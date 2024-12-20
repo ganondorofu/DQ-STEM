@@ -8,6 +8,11 @@ import geopandas as gpd
 import plotly.express as px
 import json
 import numpy as np
+import subprocess
+
+script_path = './Geo-getter.py'
+
+subprocess.run(['python', script_path])
 
 # ---------------------------------------
 # ユーティリティ関数定義
