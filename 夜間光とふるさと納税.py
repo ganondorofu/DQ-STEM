@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-# 以下は座標変換を入れた修正コード例
+# 以下は夜間光の重ね表示時に座標変換を考慮したコードの完全版です。
+# ポイント:
+# - 夜間光GeoTIFFの座標系がEPSG:4326でない場合に、pyprojでEPSG:4326へ変換する処理を実施。
+# - Plotlyでの画像レイヤー追加時、coordinatesは[左上, 右上, 右下, 左下]の順で指定。
 
 import pandas as pd
 import geopandas as gpd
@@ -14,6 +17,7 @@ from io import BytesIO
 from PIL import Image
 from pyproj import Transformer
 
+# ふるさと納税用の前処理スクリプト実行
 script_path = './Geo-getter.py'
 subprocess.run(['python', script_path])
 
@@ -22,7 +26,7 @@ def convert_to_5_digit(code):
     return code[:-1]
 
 def process_designated_cities(gdf, df):
-    # 政令指定都市の区をまとめて1つのジオメトリにする関数
+    # 政令指定都市の区をまとめて1つのジオメトリに統合
     city_codes = df[df['市区町村団体コード_5桁'].str[2:5] == '100']['市区町村団体コード_5桁'].unique()
     for city_code in city_codes:
         ward_data = gdf[(gdf['code'].str[:3] == city_code[:3]) & (gdf['code'].str[3:5] != '00')]
@@ -128,6 +132,10 @@ def list_tiff_files(directory):
     return [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.tif')]
 
 tiff_files = list_tiff_files(image_dir)
+# 手動調整用オフセット値（緯度方向のずれを補正）
+y_offset = -0.25  # 緯度方向のオフセット（プラスで上、マイナスで下）
+
+# 夜間光データ処理
 if tiff_files:
     tiff_file = tiff_files[0]
     with rasterio.open(tiff_file) as src:
@@ -150,15 +158,17 @@ if tiff_files:
         raster_crs = src.crs
         left, bottom, right, top = src.bounds
         
-        # 座標がEPSG:4326(経緯度)でない場合は変換
+        # 座標がEPSG:4326でない場合、変換
         if raster_crs and raster_crs != "EPSG:4326":
-            # Transformerを使ってEPSG:4326へ変換
             transformer = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
-            # left,bottom,right,topは (経度,緯度) 順で渡す必要がある。
             (left, bottom) = transformer.transform(left, bottom)
             (right, top) = transformer.transform(right, top)
 
-        # 画像レイヤー追加
+        # Y方向オフセットを適用
+        bottom += y_offset
+        top += y_offset
+
+        # 画像レイヤー追加 (左上→右上→右下→左下 の順で指定)
         fig.update_layout(
             mapbox={
                 "layers": [
@@ -166,10 +176,10 @@ if tiff_files:
                         "sourcetype": "image",
                         "source": data_url,
                         "coordinates": [
-                            [left, top],
-                            [right, top],
-                            [right, bottom],
-                            [left, bottom]
+                            [left, top],    # 左上
+                            [right, top],   # 右上
+                            [right, bottom],# 右下
+                            [left, bottom]  # 左下
                         ],
                         "opacity": 0.6
                     }
