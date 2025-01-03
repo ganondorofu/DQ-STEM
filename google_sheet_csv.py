@@ -2,7 +2,7 @@ import pandas as pd
 import glob
 
 # ./modelフォルダ内の全てのCSVファイルを取得
-result_files = glob.glob('./model/model_results_*.csv')
+result_files = glob.glob('./Chowa_model/model_results_*.csv')
 
 # 全データを保存するリスト
 data_frames = []

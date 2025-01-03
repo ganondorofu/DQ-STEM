@@ -4,8 +4,6 @@ import requests
 import geopandas as gpd
 import pandas as pd
 from rasterstats import zonal_stats
-from datetime import datetime
-from yoneyone import send_email
 
 def initialize_gee():
     """
@@ -71,12 +69,10 @@ def tiff_to_csv(tiff_path, shapefile_path, csv_output_path):
     TIFFファイルをzonal_statsで集計し、CSVとして出力する。
     """
     try:
-        # Shapefileを都道府県レベルに統合
         regions = merge_to_prefecture_level(shapefile_path)
         if regions is None:
             raise ValueError("Shapefile merging failed.")
 
-        # zonal_statsでmean, sumを取得
         stats = zonal_stats(regions, tiff_path, stats=["mean", "sum"], nodata=-9999)
         regions['mean_light'] = [stat['mean'] for stat in stats]
         regions['sum_light'] = [stat['sum'] for stat in stats]
@@ -88,18 +84,16 @@ def tiff_to_csv(tiff_path, shapefile_path, csv_output_path):
     except Exception as e:
         print(f"Error converting TIFF to CSV: {e}")
 
-def create_yearly_image(snippet, band, geometry, year, method='mean'):
+def create_yearly_image(snippet, geometry, year, method='mean'):
     """
-    start_date ~ end_date の期間を対象に、NOAA/VIIRSの月次データをまとめて1枚のImageにする。
-    method='mean'の場合は平均値を計算。
+    start_date ~ end_date の期間を対象に、指定されたデータセットの月次データをまとめて1枚のImageにする。
     """
     try:
         start_date = f"{year}-01-01"
         end_date = f"{year}-12-31"
         dataset = (ee.ImageCollection(snippet)
                    .filter(ee.Filter.date(start_date, end_date))
-                   .filterBounds(geometry)
-                   .select(band))
+                   .filterBounds(geometry))
         if method == 'mean':
             return dataset.mean()
         elif method == 'median':
@@ -113,32 +107,45 @@ def create_yearly_image(snippet, band, geometry, year, method='mean'):
 def main():
     initialize_gee()
 
-    snippet = 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG'
-    snippet = 'NOAA/DMSP-OLS/NIGHTTIME_LIGHTS' # 1992-01-01T00:00:00Z–2014-01-01T00:00:00Z
-    band = 'avg_rad'
-    band = 'avg_vis'
-    geometry = ee.Geometry.Rectangle([128.60, 29.97, 148.43, 46.12])
+    # 修正されたジオメトリ
+    geometry = ee.Geometry.Polygon(
+        coords=[[128.60, 29.97], [148.43, 29.97], [148.43, 46.12], [128.60, 46.12], [128.60, 29.97]],
+        proj='EPSG:4326',
+        geodesic=False
+    )
     scale = 1000
     shp_path = './N03-20220101_GML/N03-22_220101.shp'
     tiff_folder = './downloaded_data'
-    csv_folder = './yearly_csv'
+    csv_folder = './Chowa_CSV'
 
-    years = range(2006, 2021)
+    years = range(2012, 2016)
 
     for year in years:
         print(f"Processing year: {year}")
-        yearly_image = create_yearly_image(snippet, band, geometry, year)
+        try:
+            if year < 2014:
+                # DMSP データを使用
+                snippet = 'projects/sat-io/open-datasets/Harmonized_NTL/dmsp'
+                band = 'stable_lights'
+            else:
+                # VIIRS データを使用
+                snippet = 'projects/sat-io/open-datasets/Harmonized_NTL/viirs'
+                band = 'avg_rad'
 
-        if yearly_image is None:
-            continue
+            yearly_image = create_yearly_image(snippet, geometry, year)
 
-        file_tag = f"{year}_average"
-        tiff_file_path = os.path.join(tiff_folder, f"{file_tag}.tif")
-        downloaded_path = download_tiff(yearly_image, geometry, tiff_folder, file_tag, scale)
+            if yearly_image is None:
+                continue
 
-        if downloaded_path:
-            csv_file_path = os.path.join(csv_folder, f"{year}_average.csv")
-            tiff_to_csv(downloaded_path, shp_path, csv_file_path)
+            file_tag = f"{year}_harmonized"
+            tiff_file_path = os.path.join(tiff_folder, f"{file_tag}.tif")
+            downloaded_path = download_tiff(yearly_image, geometry, tiff_folder, file_tag, scale)
+
+            if downloaded_path:
+                csv_file_path = os.path.join(csv_folder, f"{file_tag}.csv")
+                tiff_to_csv(downloaded_path, shp_path, csv_file_path)
+        except Exception as e:
+            print(f"An error occurred while processing {year}: {e}")
 
 if __name__ == "__main__":
     main()
