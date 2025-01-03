@@ -1,7 +1,8 @@
 import pandas as pd
+import glob
 
-# ファイルパスを取得（各年の結果ファイル）
-result_files = ['./model/model_results_2006.csv', './model/model_results_2010.csv', './model/model_results_2014.csv', './model/model_results_2021.csv']
+# ./modelフォルダ内の全てのCSVファイルを取得
+result_files = glob.glob('./model/model_results_*.csv')
 
 # 全データを保存するリスト
 data_frames = []
