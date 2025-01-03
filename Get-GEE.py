@@ -2,31 +2,28 @@ import ee
 import os
 import requests
 import geopandas as gpd
-import rasterio
-from rasterstats import zonal_stats
 import pandas as pd
+from rasterstats import zonal_stats
+from datetime import datetime
+from yoneyone import send_email
 
-ee.Authenticate()  # 認証を必要に応じてコメントアウト
-ee.Initialize(project='stem-443415')
-print("Google Earth Engine initialized successfully.")
-
-# GEEのデータロード
-def load_data(snippet, from_date, to_date, geometry, band):
+def initialize_gee():
+    """
+    GEEを認証・初期化する関数。
+    """
     try:
-        dataset = ee.ImageCollection(snippet).filter(
-            ee.Filter.date(from_date, to_date)).filterBounds(geometry).select(band)
-        data_list = dataset.toList(dataset.size())
-        num_data = dataset.size().getInfo()
-        print(f"Number of datasets found: {num_data}")
-        return num_data, data_list
+        ee.Authenticate()  # 必要に応じてコメントアウト
+        ee.Initialize(project='stem-443415')
+        print("Google Earth Engine initialized successfully.")
     except Exception as e:
-        print(f"Error loading data: {e}")
-        return 0, None
+        print(f"Error initializing Google Earth Engine: {e}")
+        exit(1)
 
-# ローカルに保存するためのエクスポート
-def save_to_local(image, geometry, folder_path, file_name, scale):
+def download_tiff(image, geometry, folder_path, file_name, scale):
+    """
+    GEEのImageをGeoTIFFとしてローカルに保存する。
+    """
     try:
-        # エクスポート用URL生成
         url = image.getDownloadURL({
             'scale': scale,
             'region': geometry.getInfo()['coordinates'],
@@ -34,7 +31,6 @@ def save_to_local(image, geometry, folder_path, file_name, scale):
             'format': 'GeoTIFF'
         })
 
-        # データのダウンロード
         print(f"Downloading {file_name} ...")
         response = requests.get(url, stream=True)
         if response.status_code == 200:
@@ -53,53 +49,96 @@ def save_to_local(image, geometry, folder_path, file_name, scale):
         print(f"An error occurred while downloading {file_name}: {e}")
         return None
 
-# TIFFデータをCSV形式に変換
-def tiff_to_csv(tiff_path, regions_path, csv_output_path):
+def merge_to_prefecture_level(shapefile_path):
+    """
+    Shapefileを都道府県レベルに統合する。
+    """
     try:
-        # 地域データの読み込み（Shapefile）
-        regions = gpd.read_file(regions_path)
+        regions = gpd.read_file(shapefile_path)
+        if 'N03_001' not in regions.columns:
+            raise ValueError("地域名を示すカラム N03_001 が見つかりません。")
 
-        # 夜間光データを地域ごとに集計
-        stats = zonal_stats(regions, tiff_path, stats=["mean", "sum"])
+        regions = regions.dissolve(by='N03_001').reset_index()
+        regions = regions.rename(columns={"N03_001": "region_name"})
+        print("Shapefile merged to prefecture level.")
+        return regions
+    except Exception as e:
+        print(f"Error merging Shapefile: {e}")
+        return None
+
+def tiff_to_csv(tiff_path, shapefile_path, csv_output_path):
+    """
+    TIFFファイルをzonal_statsで集計し、CSVとして出力する。
+    """
+    try:
+        # Shapefileを都道府県レベルに統合
+        regions = merge_to_prefecture_level(shapefile_path)
+        if regions is None:
+            raise ValueError("Shapefile merging failed.")
+
+        # zonal_statsでmean, sumを取得
+        stats = zonal_stats(regions, tiff_path, stats=["mean", "sum"], nodata=-9999)
         regions['mean_light'] = [stat['mean'] for stat in stats]
         regions['sum_light'] = [stat['sum'] for stat in stats]
 
-        # CSVとしてエクスポート
+        if not os.path.exists(os.path.dirname(csv_output_path)):
+            os.makedirs(os.path.dirname(csv_output_path))
         regions[['region_name', 'mean_light', 'sum_light']].to_csv(csv_output_path, index=False)
         print(f"CSV saved at: {csv_output_path}")
     except Exception as e:
         print(f"Error converting TIFF to CSV: {e}")
 
-# メイン処理
+def create_yearly_image(snippet, band, geometry, year, method='mean'):
+    """
+    start_date ~ end_date の期間を対象に、NOAA/VIIRSの月次データをまとめて1枚のImageにする。
+    method='mean'の場合は平均値を計算。
+    """
+    try:
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        dataset = (ee.ImageCollection(snippet)
+                   .filter(ee.Filter.date(start_date, end_date))
+                   .filterBounds(geometry)
+                   .select(band))
+        if method == 'mean':
+            return dataset.mean()
+        elif method == 'median':
+            return dataset.median()
+        else:
+            return dataset.mean()
+    except Exception as e:
+        print(f"Error creating yearly image: {e}")
+        return None
+
 def main():
-    # パラメーター設定
+    initialize_gee()
+
     snippet = 'NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG'
+    snippet = 'NOAA/DMSP-OLS/NIGHTTIME_LIGHTS' # 1992-01-01T00:00:00Z–2014-01-01T00:00:00Z
     band = 'avg_rad'
-    from_date = '2014-01-01'
-    to_date = '2024-06-04'
-    geometry = ee.Geometry.Rectangle([128.60, 29.97, 148.43, 46.12])  # 日本全域
+    band = 'avg_vis'
+    geometry = ee.Geometry.Rectangle([128.60, 29.97, 148.43, 46.12])
     scale = 1000
-    folder_path = './downloaded_data'  # 保存先フォルダ
-    regions_path = './N03-20220101_GML/N03-22_220101.shp'  # 地域境界データ（Shapefile）
-    csv_output_path = './nightlight_data.csv'  # 出力CSVファイル
+    shp_path = './N03-20220101_GML/N03-22_220101.shp'
+    tiff_folder = './downloaded_data'
+    csv_folder = './yearly_csv'
 
-    # データをロード
-    num_data, data_list = load_data(snippet, from_date, to_date, geometry, band)
+    years = range(2006, 2013)
 
-    # データのダウンロードと変換
-    if num_data > 0 and data_list is not None:
-        for i in range(num_data):
-            try:
-                image = ee.Image(data_list.get(i))
-                image_info = image.getInfo()
-                file_name = image_info['id'].replace('/', '_')  # ファイル名を生成
-                tiff_path = save_to_local(image, geometry, folder_path, file_name, scale)
+    for year in years:
+        print(f"Processing year: {year}")
+        yearly_image = create_yearly_image(snippet, band, geometry, year)
 
-                # ダウンロード成功時にCSV変換
-                if tiff_path:
-                    tiff_to_csv(tiff_path, regions_path, csv_output_path)
-            except Exception as e:
-                print(f"Error processing image {i}: {e}")
+        if yearly_image is None:
+            continue
+
+        file_tag = f"{year}_average"
+        tiff_file_path = os.path.join(tiff_folder, f"{file_tag}.tif")
+        downloaded_path = download_tiff(yearly_image, geometry, tiff_folder, file_tag, scale)
+
+        if downloaded_path:
+            csv_file_path = os.path.join(csv_folder, f"{year}_average.csv")
+            tiff_to_csv(downloaded_path, shp_path, csv_file_path)
 
 if __name__ == "__main__":
     main()
