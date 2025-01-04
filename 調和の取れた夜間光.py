@@ -118,7 +118,7 @@ def main():
     tiff_folder = './downloaded_data'
     csv_folder = './Chowa_CSV'
 
-    years = range(2012, 2016)
+    years = range(2021, 2022)
 
     for year in years:
         print(f"Processing year: {year}")
