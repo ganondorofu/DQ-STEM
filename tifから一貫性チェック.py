@@ -7,7 +7,7 @@ import glob
 import os  # ファイル名操作に必要
 
 # GeoTIFFデータを結合
-tif_folder = './USA'  # GeoTIFFファイルの保存先フォルダ
+tif_folder = './USA_Combined'  # GeoTIFFファイルの保存先フォルダ
 tif_files = glob.glob(f"{tif_folder}/*.tif")
 
 # データを保存するリスト
