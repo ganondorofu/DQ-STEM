@@ -16,37 +16,36 @@ import matplotlib.pyplot as plt
 # ここで日本語フォントを設定します（Windowsなら"Meiryo"など）
 plt.rcParams['font.family'] = 'Meiryo'
 
-# データのエンコーディングを特定するクラス
+# データのエンコーディングを特定
 with open('./night_light_gdp.csv', 'rb') as f:
     result = chardet.detect(f.read())
     encoding = result['encoding']
     print(f"Detected encoding: {encoding}")
 
-# データを読み込むクラス
+# データを読み込む
 data = pd.read_csv('./night_light_gdp.csv', encoding=encoding)
 
-# 夜間光を正規化するクラス
-# （夜間光の最小値、最大値を使って0-1スケールに変換しています）
+# 夜間光を正規化
 data['mean_light_ratio'] = (data['mean_light'] - data['mean_light'].min()) / (data['mean_light'].max() - data['mean_light'].min())
 
-# 指定した都道府県のGDPを基準に、他のGDPを比率化するクラス
-reference_prefecture = '東京都'  # 基準となる都道府県
+# 指定した都道府県のGDPを基準に比率化
+reference_prefecture = '東京都'
 reference_gdp = data.loc[data['region_name'] == reference_prefecture, 'GDP'].values[0]
 data['gdp_ratio'] = data['GDP'] / reference_gdp
 
-# 特徴量とターゲットを設定するクラス
-X = data[['mean_light_ratio']]  # 夜間光の比率
-y = data['gdp_ratio']           # GDPの比率
+# 特徴量とターゲットを設定
+X = data[['mean_light_ratio']]
+y = data['gdp_ratio']
 
-# 特徴量を標準化するクラス
+# 特徴量を標準化
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
-# 交差検証の結果を格納するリスト
+# 交差検証の結果を格納
 results_kfold = []
 results_loyo = []
 
-# モデルを定義するクラス
+# モデルを定義
 model = RandomForestRegressor(random_state=42)
 
 # --- K-Fold法 ---
@@ -55,8 +54,6 @@ kf = KFold(n_splits=8, shuffle=False)
 for fold, (train_idx, test_idx) in enumerate(kf.split(X_scaled)):
     X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
     y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-
-    # モデルの訓練と評価
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     mse = mean_squared_error(y_test, y_pred)
@@ -71,13 +68,10 @@ unique_years = data['年'].unique()
 for year in unique_years:
     train_data = data[data['年'] != year]
     test_data = data[data['年'] == year]
-
     X_train = scaler.transform(train_data[['mean_light_ratio']])
     y_train = train_data['gdp_ratio']
     X_test = scaler.transform(test_data[['mean_light_ratio']])
     y_test = test_data['gdp_ratio']
-
-    # モデルの訓練と評価
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     mse = mean_squared_error(y_test, y_pred)
@@ -86,47 +80,17 @@ for year in unique_years:
 
 print(f"Average MSE (Leave-One-Year-Out): {np.mean(results_loyo):.4f}")
 
-# --- その年のGDP予測 ---
-print("\nPredicting GDP for the same year based on nightlight data...")
-data['predicted_gdp_ratio'] = np.nan
-
-for year in unique_years:
-    train_data = data[data['年'] != year]
-    test_data = data[data['年'] == year]
-
-    X_train = scaler.transform(train_data[['mean_light_ratio']])
-    y_train = train_data['gdp_ratio']
-    X_test = scaler.transform(test_data[['mean_light_ratio']])
-
-    # モデルの訓練と予測
-    model.fit(X_train, y_train)
-    predicted_gdp_ratio = model.predict(X_test)
-
-    # 予測結果をデータフレームに追加
-    data.loc[data['年'] == year, 'predicted_gdp_ratio'] = predicted_gdp_ratio
-
-# 実際のGDPと予測GDPの比較
-data['predicted_gdp'] = data['predicted_gdp_ratio'] * reference_gdp
-comparison = data[['region_name', '年', 'GDP', 'predicted_gdp']].dropna()
-comparison['difference'] = comparison['GDP'] - comparison['predicted_gdp']
-print("\nComparison of Actual and Predicted GDP:")
-print(comparison)
-
 # --- 未来のGDP予測 ---
 print("\nPredicting GDP for 2022 and beyond...")
 future_years = [2022, 2023, 2024]
 future_data_list = []
-
 for year in future_years:
     future_file = f"./2022-2024nightlight/{year}_average.csv"
     future_data = pd.read_csv(future_file, encoding=encoding)
-
-    # 学習データの最小値・最大値をもとに同じ方式で正規化する
     future_data['mean_light_ratio'] = (
         (future_data['mean_light'] - data['mean_light'].min())
         / (data['mean_light'].max() - data['mean_light'].min())
     )
-
     X_future = scaler.transform(future_data[['mean_light_ratio']])
     future_data['predicted_gdp_ratio'] = model.predict(X_future)
     future_data['predicted_gdp'] = future_data['predicted_gdp_ratio'] * reference_gdp
@@ -163,13 +127,13 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# 未来予測結果のプロット
+# --- GDP予測値の多い順に棒グラフをプロット ---
 plt.figure(figsize=(12, 6))
 for year in future_years:
-    subset = future_combined[future_combined['Year'] == year]
+    subset = future_combined[future_combined['Year'] == year].sort_values(by='predicted_gdp', ascending=False)
     plt.bar(subset['region_name'], subset['predicted_gdp'], label=f'Year {year}', alpha=0.7)
 
-plt.title('Predicted GDP for 2022, 2023, and 2024')
+plt.title('Predicted GDP for 2022, 2023, and 2024 (Sorted by Predicted GDP)')
 plt.xlabel('Region')
 plt.ylabel('Predicted GDP')
 plt.xticks(rotation=45, fontsize=8)
