@@ -102,41 +102,32 @@ future_combined = pd.concat(future_data_list, ignore_index=True)
 print("Future predictions:")
 print(future_combined[['region_name', 'Year', 'predicted_gdp']])
 
-# --- グラフの描画 ---
-# K-Fold結果のグラフ
-plt.figure(figsize=(10, 6))
-plt.bar(range(1, len(results_kfold) + 1), results_kfold, color='skyblue', edgecolor='black')
-plt.axhline(np.mean(results_kfold), color='red', linestyle='--', label='Average MSE')
-plt.title('K-Fold Cross-Validation Results (Normalized Data)')
-plt.xlabel('Fold')
-plt.ylabel('MSE')
-plt.xticks(range(1, len(results_kfold) + 1))
-plt.legend()
-plt.tight_layout()
-plt.show()
+# --- GDP予測値の多い順に棒グラフをプロット (2022年の東京を1とする) ---
+# 2022年の東京のGDPを基準に設定
+tokyo_2022_gdp = future_combined[
+    (future_combined['region_name'] == '東京都') & (future_combined['Year'] == 2022)
+]['predicted_gdp'].values[0]
 
-# Leave-One-Year-Out結果のグラフ
-plt.figure(figsize=(10, 6))
-plt.bar(unique_years, results_loyo, color='lightgreen', edgecolor='black')
-plt.axhline(np.mean(results_loyo), color='red', linestyle='--', label='Average MSE')
-plt.title('Leave-One-Year-Out Cross-Validation Results (Normalized Data)')
-plt.xlabel('Year')
-plt.ylabel('MSE')
-plt.xticks(unique_years, rotation=45)
-plt.legend()
-plt.tight_layout()
-plt.show()
+# 比率を計算
+future_combined['gdp_ratio_to_tokyo_2022'] = future_combined['predicted_gdp'] / tokyo_2022_gdp
 
-# --- GDP予測値の多い順に棒グラフをプロット ---
+# 各地域の3年間の平均で並べ替え
+future_combined['mean_gdp_ratio'] = future_combined.groupby('region_name')['gdp_ratio_to_tokyo_2022'].transform('mean')
+
+# グラフの描画
 plt.figure(figsize=(12, 6))
-for year in future_years:
-    subset = future_combined[future_combined['Year'] == year].sort_values(by='predicted_gdp', ascending=False)
-    plt.bar(subset['region_name'], subset['predicted_gdp'], label=f'Year {year}', alpha=0.7)
+bar_width = 0.25
+x_positions = np.arange(future_combined['region_name'].nunique())
 
-plt.title('Predicted GDP for 2022, 2023, and 2024 (Sorted by Predicted GDP)')
+for i, year in enumerate(future_years):
+    subset = future_combined[future_combined['Year'] == year].sort_values(by='mean_gdp_ratio', ascending=False)
+    region_names = subset['region_name'].unique()
+    plt.bar(x_positions + i * bar_width, subset['gdp_ratio_to_tokyo_2022'], width=bar_width, label=f'Year {year}')
+
+plt.title('Predicted GDP Ratio (2022 Tokyo = 1) for 2022, 2023, and 2024')
 plt.xlabel('Region')
-plt.ylabel('Predicted GDP')
-plt.xticks(rotation=45, fontsize=8)
+plt.ylabel('Predicted GDP Ratio (2022 Tokyo = 1)')
+plt.xticks(x_positions + bar_width, region_names, rotation=45, fontsize=8)
 plt.legend()
 plt.tight_layout()
 plt.show()
