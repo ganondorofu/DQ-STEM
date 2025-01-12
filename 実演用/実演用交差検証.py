@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-夜間光データを用いてGDPを予測するスクリプト例
-グラフの横軸が文字化けしないよう、matplotlibで日本語フォントを設定します。
-"""
-
 import chardet
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
