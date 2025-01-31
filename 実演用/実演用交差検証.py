@@ -112,7 +112,6 @@ future_combined['mean_gdp_ratio'] = future_combined.groupby('region_name')['gdp_
 plt.figure(figsize=(12, 6))
 bar_width = 0.25
 x_positions = np.arange(future_combined['region_name'].nunique())
-
 for i, year in enumerate(future_years):
     subset = future_combined[future_combined['Year'] == year].sort_values(by='mean_gdp_ratio', ascending=False)
     region_names = subset['region_name'].unique()
